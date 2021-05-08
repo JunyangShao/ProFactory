@@ -90,13 +90,20 @@ msgCloseRsp = MsgSymbol fmtL2 [0, 5]
 msgPayload = MsgSymbol fmtL2 [1]
 
 --Define parsers
-recvMsgConnReqRoutine = Routine xxx [connStart] connected xx -- statements have been changed and they would be updated later
-recvMsgConnRspRoutine = Routine xxx [connSent] connected xx -- statements have been changed and they would be updated later
-recvMsgConfReqRoutine = Routine xxx [connected] configured xx -- statements have been changed and they would be updated later
-recvMsgConfRspRoutine = Routine xxx [confSent] configured xx -- statements have been changed and they would be updated later
-recvMsgCloseReqRoutine = Routine xxx [configured] connClose xx -- statements have been changed and they would be updated later
-recvMsgCloseRspRoutine = Routine xxx [closeReqSent] connClose xx -- statements have been changed and they would be updated later
-recvMsgPayloadRoutine = Routine xxx [configured] configured xx -- statements have been changed and they would be updated later
+recvMsgConnReqRoutine = Routine xxx [connStart] connected xx
+-- statements have been changed and they would be updated later
+recvMsgConnRspRoutine = Routine xxx [connSent] connected xx
+-- statements have been changed and they would be updated later
+recvMsgConfReqRoutine = Routine xxx [connected] configured xx
+-- statements have been changed and they would be updated later
+recvMsgConfRspRoutine = Routine xxx [confSent] configured xx
+-- statements have been changed and they would be updated later
+recvMsgCloseReqRoutine = Routine xxx [configured] connClose xx
+-- statements have been changed and they would be updated later
+recvMsgCloseRspRoutine = Routine xxx [closeReqSent] connClose xx
+-- statements have been changed and they would be updated later
+recvMsgPayloadRoutine = Routine xxx [configured] configured xx
+-- statements have been changed and they would be updated later
 recvMsgConnReq = Recv msgConnReq msgConnRsp [recvMsgConnReqRoutine]
 recvMsgConfReq = Recv msgConfReq msgConfRsp [recvMsgConfReqRoutine]
 recvMsgCloseReq = Recv msgCloseReq msgCloseRsp [recvMsgCloseReqRoutine]
@@ -106,9 +113,12 @@ recvMsgCloseRsp = Recv msgCloseRsp MsgEmpty [recvMsgCloseRspRoutine]
 recvMsgPayload = Recv msgPayload MsgEmpty [recvMsgPayloadRoutine]
 
 --Define send activity
-sendMsgConnReqRoutine = Routine xxx [connStart] connSent xx -- statements have been changed and they would be updated later
-sendMsgCloseReqRoutine = Routine xxx [configured] closeReqSent xx -- statements have been changed and they would be updated later
-sendMsgPayloadRoutine = Routine xxx [configured] configured xx -- statements have been changed and they would be updated later
+sendMsgConnReqRoutine = Routine xxx [connStart] connSent xx
+-- statements have been changed and they would be updated later
+sendMsgCloseReqRoutine = Routine xxx [configured] closeReqSent xx
+-- statements have been changed and they would be updated later
+sendMsgPayloadRoutine = Routine xxx [configured] configured xx
+-- statements have been changed and they would be updated later
 sendMsgConnReq = Send msgConnReq [sendMsgConnReqRoutine]
 sendMsgCloseReqRoutine = Send msgCloseReq [sendMsgCloseReqRoutine]
 sendMsgPayload = Send msgPayload [sendMsgPayloadRoutine]

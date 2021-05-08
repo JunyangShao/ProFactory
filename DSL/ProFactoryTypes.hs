@@ -9,6 +9,8 @@ where
 import Data.Char
 import Data.List
 
+-- Some protocol/platform-dependent instances are summarized here
+-- They would be further refactored out to another independent hs constant module
 protoName = "l2cap"
 protoFamilySkbAlloc = "bt_skb_alloc"
 

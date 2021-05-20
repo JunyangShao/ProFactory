@@ -55,7 +55,7 @@ paraDstChanID = Para "dstChanID" 3 dstChanID
 paraConfResult = Para "confResult" 4 confResult
 chan = Chan [paraMTU, paraPSM, paraSrcChanID, paraDstChanID, paraConfResult]
 
---Define L2CAP connection data structure
+--Define L2CAP connection/channel data structure
 conn = Conn []
 
 --Define protocol state
@@ -90,9 +90,9 @@ msgCloseRsp = MsgSymbol fmtL2 [0, 5]
 msgPayload = MsgSymbol fmtL2 [1]
 
 --Define parsers
-recvMsgConnReqRoutine = Routine xxx [connStart] connected xx
+recvMsgConnReqRoutine = Routine (FindChanByParaExpr paraDstChanID (BinaryExpr xx PfACC xx)) [connStart] connected xx
 -- statements have been changed and they would be updated later
-recvMsgConnRspRoutine = Routine xxx [connSent] connected xx
+recvMsgConnRspRoutine = Routine (BinaryExpr (BinaryExpr result)) [connSent] connected xx
 -- statements have been changed and they would be updated later
 recvMsgConfReqRoutine = Routine xxx [connected] configured xx
 -- statements have been changed and they would be updated later

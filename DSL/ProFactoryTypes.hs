@@ -8,11 +8,7 @@ where
 
 import Data.Char
 import Data.List
-
--- Some protocol/platform-dependent instances are summarized here
--- They would be further refactored out to another independent hs constant module
-protoName = "l2cap"
-protoFamilySkbAlloc = "bt_skb_alloc"
+import L2CAPClassicInterfaceNames
 
 -- Define typeclass for printing names in code generation
 -- Then define instances for each type
@@ -472,7 +468,7 @@ instance PfCode Msg where
 -- A buffer is allocated the constant 1600 bytes
 allocOutMsg :: Msg -> String
 allocOutMsg MsgEmpty = ""
-allocOutMsg (MsgSymbol x y) = "skb_out=" ++ protoFamilySkbAlloc ++ "(1600, GFP_ATOMIC);\n"
+allocOutMsg (MsgSymbol x y) = "skb_out=" ++ protoFamilySkbAllocName ++ "(1600, GFP_ATOMIC);\n"
 
 sendOutMsg :: Msg -> String
 sendOutMsg MsgEmpty = ""

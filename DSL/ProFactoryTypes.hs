@@ -8,7 +8,13 @@ where
 
 import Data.Char
 import Data.List
-import L2CAPClassicInterfaceNames
+-- import L2CAPClassicInterfaceNames
+
+-- Protocol name
+protoName = "l2cap"
+
+-- Protocol family socket buffer allocation
+protoFamilySkbAllocName = "bt_skb_alloc"
 
 -- Define typeclass for printing names in code generation
 -- Then define instances for each type
@@ -479,7 +485,8 @@ freeOutMsg MsgEmpty = ""
 freeOutMsg (MsgSymbol x y) = "kfree_skb(skb_out);\n"
 	
 -- A message processing routine
-data Routine = Routine { routineCondExpr :: PfExpr -- Condition
+data Routine = Routine { routineCondExpr :: PfExpr -- Pre-Condition
+--                       routinePostCondExpr :: PfExpr -- Post-Condition
                        , routineFrom :: [State] -- Start state(s)
 			           , routineTo :: State -- End state
 			           , routineAction :: PfStmt -- Parsing
@@ -490,7 +497,7 @@ genCondExpr EmptyExpr = ""
 genCondExpr x = pfCodeGen x ++ "&&"
 
 genRoutineConditionExpr :: PfExpr -> [State] -> String
-genRoutineConditionExpr x y = "(" ++ genCondExpr x ++ intercalate "&&" (map pfCodeGen y) ++ ")" 
+genRoutineConditionExpr x y = "(" ++ genCondExpr x ++ intercalate "||" (map pfCodeGen y) ++ ")" 
 
 genRoutineStateUpdate :: State -> String
 genRoutineStateUpdate (State x y z) = "pchan->state=" ++ pfGetMacro (State x y z) ++ ";\n"

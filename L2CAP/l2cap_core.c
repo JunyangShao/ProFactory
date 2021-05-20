@@ -74,6 +74,9 @@ static int parse_msgConfReq(struct l2cap_conn* pconn, struct l2cap_chan* pchan, 
 static int parse_msgConfRsp(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in);
 static int parse_msgCloseReq(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in);
 static int parse_msgCloseRsp(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in);
+static int send_msgConnReq(struct l2cap_conn* pconn, struct l2cap_chan* pchan, void* data, __u32 data_len);
+static int send_msgL2Payload(struct l2cap_conn* pconn, struct l2cap_chan* pchan, void* data, __u32 data_len);
+static int send_msgCloseReq(struct l2cap_conn* pconn, struct l2cap_chan* pchan, void* data, __u32 data_len);
 
 static inline u8 bdaddr_type(u8 link_type, u8 bdaddr_type)
 {

@@ -10,11 +10,40 @@ import Data.Char
 import Data.List
 -- import L2CAPClassicInterfaceNames
 
+-- Define some protocol-specific interfaces
+-- These interfaces are supposed to be hardcoded
 -- Protocol name
 protoName = "l2cap"
 
+-- Protocol channel
+protoChan = "l2cap_chan"
+
+-- Protocol connection
+protoConn = "l2cap_conn"
+
 -- Protocol family socket buffer allocation
-protoFamilySkbAllocName = "bt_skb_alloc"
+protoFamilySkbAlloc = "bt_skb_alloc(1600, GFP_KERNEL);\n"
+
+-- Lower-layer device connection management
+lowLayerDevConnMgmt = "hci_dev_connect_mgmt(pconn);\n"
+
+-- lock the iteration of channel list
+lockChanList = "mutex_lock(&pconn->chan_lock);\n"
+
+-- unlock the iteration of channel list
+unlockChanList = "mutex_unlock(&pconn->chan_lock);\n"
+
+-- lock the channel
+lockChan = "l2cap_chan_lock(pchan);\n"
+
+-- unlock the channel
+unlockChan = "l2cap_chan_unlock(pchan);\n"
+
+-- lower-layer delivery
+lowLayerDeliver = ""
+
+-- higher-leayer receive
+highLayerReceive = ""
 
 -- Define typeclass for printing names in code generation
 -- Then define instances for each type
@@ -42,9 +71,11 @@ class PfEmit a where
     pfEmitMacro :: a -> String -- Emit macro definitions
     pfEmitDeclare :: a -> String -- Emit declarations
     pfEmitBlock :: a -> String -- Generic code block emission
+    pfEmitFunc :: a -> String -- Specialized function base emission
     pfEmitMacro x = error("Function pfEmitMacro is not implemented for this type")
     pfEmitDeclare x = error("Function pfEmitDeclare is not implemented for this type")
     pfEmitBlock x = error("Function pfEmitBlock is not implemented for this type")
+    pfEmitFunc x = error("Function pfEmitFunc is not implemented for this type")
 
 -- Define operators. Note that we define customized operators because we need to hold
 -- expression instead of direct semantic evaluation or code transformation. Those expressions
@@ -319,8 +350,7 @@ instance PfCode PfExpr where
     pfCodeGen (PriorExpr x) = "(" ++ pfCodeGen x ++ ")"
     pfCodeGen (SetChanParaExpr x y) = "pchan->" ++ pfCodeGen x ++ "=" ++ pfCodeGen y
     pfCodeGen (SetConnParaExpr x y) = "pconn->" ++ pfCodeGen x ++ "=" ++ pfCodeGen y
-    pfCodeGen (FindChanByParaExpr x y) = "pchan=get_chan_by_" ++ pfCodeGen x ++ "(pconn, " ++ pfCodeGen y ++ ");\n"
-										 ++ "if(!pchan) return -1;\n"
+    pfCodeGen (FindChanByParaExpr x y) = "pchan=get_chan_by_" ++ pfCodeGen x ++ "(pconn, " ++ pfCodeGen y ++ ")"
 
 -- Define state
 data State = State { stateName :: String
@@ -474,7 +504,7 @@ instance PfCode Msg where
 -- A buffer is allocated the constant 1600 bytes
 allocOutMsg :: Msg -> String
 allocOutMsg MsgEmpty = ""
-allocOutMsg (MsgSymbol x y) = "skb_out=" ++ protoFamilySkbAllocName ++ "(1600, GFP_ATOMIC);\n"
+allocOutMsg (MsgSymbol x y) = "skb_out=" ++ protoFamilySkbAlloc
 
 sendOutMsg :: Msg -> String
 sendOutMsg MsgEmpty = ""
@@ -519,14 +549,36 @@ genRoutineBranches (x : xs) = genRoutineIfBranch x ++ sBranches ++ "else goto dr
         sBranches | length xs == 0 = ""
                   | otherwise = concat (map genRoutineElseIfBranch xs)
 
+-- Currently, we cannot fully virtualize the complete set of hardware features.
+-- Hence, we now use some routine procedures that are BT-L2CAP-specific to bridge the gap.
+-- This is highly coupled with our use case
+-- Note that it is a temporary workaround but it could be improved later by a full Bluetooth hardwere virtualization effort
+-- For testing our use case, we just choose to hardcode this in l2cap_core.c
+-- Again, this is a workaround for testing or framework assessment, also compatible with existing BT applications, but this temporary solution could be further improved through hardware feature genralization and virtualization
+connectOneRoutine = "" 
+connectTwoRoutine = ""
+configOneRoutine = ""
+configTwoRoutine = ""
+closeOneRoutine = ""
+closeTwoRoutine = ""
+
+genFuncRoutine :: Int -> String
+genFuncRoutine x | x == 1 = connectOneRoutine
+                 | x == 2 = connectTwoRoutine
+	         | x == 3 = configOneRoutine
+	         | x == 4 = configTwoRoutine
+	         | x == 5 = closeOneRoutine
+	         | x == 6 = closeTwoRoutine
+
 -- Define message receving actions
 data Recv = Recv { recvMsg :: Msg -- Incoming message
                  , sendOut :: Msg -- Response message, maybe empty
                  , recvRoutineList :: [Routine]
+                 , recvInterface :: Int
                  }
 
 instance PfCode Recv where
-    pfCodeGen (Recv x y z) = "static int " ++ getMsgInnerParser x
+    pfCodeGen (Recv x y z k) = "static int " ++ getMsgInnerParser x
                              ++ "(struct " ++ protoName ++"_conn* pconn,"
                              ++ "struct " ++ protoName ++ "_chan* pchan,"
                              ++ "struct sk_buff* skb_in) {\n"
@@ -543,6 +595,22 @@ instance PfCode Recv where
 
 instance PfEmit Recv where
     pfEmitBlock x = pfCodeGen x
+    pfEmitFunc (Recv x y z k) = "static int " ++ getMsgInnerParser x
+                                ++ "(struct " ++ protoConn ++ "* pconn,"
+                                ++ "struct " ++ protoChan ++ "* pchan,"
+                                ++ "struct sk_buff* skb_in) {\n"
+			        ++ pfLocalGen x
+			        ++ pfConstructLocalGen y
+				++ pfExtractGen x
+				++ allocOutMsg y
+				++ pfConstructExtractGen y
+--				++ genRoutineBranches z
+				++ genFuncRoutine k
+				++ sendOutMsg y
+				++ "kfree_skb(skb_in);\n" ++ "return 0;\n"
+			        ++ "drop:\n" ++ freeOutMsg y ++ "kfree_skb(skb_in);\n" ++ "return -1;\n"
+                                ++ "}\n"
+  
 
 -- Define message sending actions
 data Send = Send { sendMsg :: Msg -- Outgoing message

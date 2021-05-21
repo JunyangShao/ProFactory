@@ -70,13 +70,13 @@ static int parse_msgL2Cmd(struct l2cap_conn* pconn, struct l2cap_chan* pchan, st
 static int parse_msgL2Payload(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in);
 static int parse_msgConnReq(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in);
 static int parse_msgConnRsp(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in);
-static int parse_msgConfReq(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in);
+static int parse_msgConfReqList(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in);
 static int parse_msgConfRsp(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in);
 static int parse_msgCloseReq(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in);
 static int parse_msgCloseRsp(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in);
-static int send_msgConnReq(struct l2cap_conn* pconn, struct l2cap_chan* pchan, void* data, __u32 data_len);
-static int send_msgL2Payload(struct l2cap_conn* pconn, struct l2cap_chan* pchan, void* data, __u32 data_len);
-static int send_msgCloseReq(struct l2cap_conn* pconn, struct l2cap_chan* pchan, void* data, __u32 data_len);
+static void send_msgConnReq(struct l2cap_conn* pconn, struct l2cap_chan* pchan);
+static void send_msgL2Payload(struct l2cap_chan* pchan, struct sk_buff* skb_out);
+static void hci_dev_connect_mgmt(struct l2cap_conn* pconn); 
 
 static inline u8 bdaddr_type(u8 link_type, u8 bdaddr_type)
 {
@@ -124,6 +124,19 @@ static struct l2cap_chan *__l2cap_get_chan_by_scid(struct l2cap_conn *conn,
 			return c;
 	}
 	return NULL;
+}
+
+//+++ProFactory tag
+static struct l2cap_chan* get_chan_by_scid(struct l2cap_conn* pconn, u16 cid){
+	struct l2cap_chan* pchan=NULL;
+	mutex_lock(&pconn->chan_lock);
+	pchan=__l2cap_get_chan_by_scid(pconn, cid);
+	if(!pchan) {
+		mutex_unlock(&pconn->chan_lock);
+		return NULL;
+	}
+	l2cap_chan_lock(pchan);
+	return pchan;
 }
 
 /* Find channel with given SCID.
@@ -863,6 +876,17 @@ static u8 l2cap_get_ident(struct l2cap_conn *conn)
 	return id;
 }
 
+//+++ProFactory tag
+static void l2cap_hci_high_prior_send(struct l2cap_conn* pconn, struct sk_buff* skb_out){
+	u8 flags;
+	if(!skb_out) return;
+	if (lmp_no_flush_capable(pconn->hcon->hdev)) flags = ACL_START_NO_FLUSH;
+	else flags = ACL_START;
+	bt_cb(skb_out)->force_active = BT_POWER_FORCE_ACTIVE_ON;
+	skb_out->priority = HCI_PRIO_MAX;
+	hci_send_acl(pconn->hchan, skb_out, flags);
+}
+
 static void l2cap_send_cmd(struct l2cap_conn *conn, u8 ident, u8 code, u16 len,
 			   void *data)
 {
@@ -892,6 +916,31 @@ static bool __chan_is_moving(struct l2cap_chan *chan)
 {
 	return chan->move_state != L2CAP_MOVE_STABLE &&
 	       chan->move_state != L2CAP_MOVE_WAIT_PREPARE;
+}
+
+//+++ProFactory tag
+static void send_msgL2Payload(struct l2cap_chan* pchan, struct sk_buff* skb_out){
+	l2cap_hci_low_prior_send(pchan, skb_out);
+}
+
+//+++ProFactory tag
+static void l2cap_hci_low_prior_send(struct l2cap_chan* pchan, struct sk_buff* skb_out){
+	struct hci_conn* hcon = pchan->conn->hcon;
+	u16 flags;
+	if(!skb_out) return;
+	if (pchan->hs_hcon && !__chan_is_moving(pchan)) {
+		if (pchan->hs_hchan)
+			hci_send_acl(pchan->hs_hchan, skb_out, ACL_COMPLETE);
+		else
+			kfree_skb(skb_out);
+		return;
+	}
+	if (!test_bit(FLAG_FLUSHABLE, &pchan->flags) && lmp_no_flush_capable(hcon->hdev))
+		flags = ACL_START_NO_FLUSH;
+	else
+		flags = ACL_START;
+	bt_cb(skb_out)->force_active = test_bit(FLAG_FORCE_ACTIVE, &pchan->flags);
+	hci_send_acl(pchan->conn->hchan, skb_out, flags);
 }
 
 static void l2cap_do_send(struct l2cap_chan *chan, struct sk_buff *skb)
@@ -1182,6 +1231,22 @@ static bool l2cap_check_efs(struct l2cap_chan *chan)
 	return true;
 }
 
+//+++ProFactory tag
+static void send_msgConnReq(struct l2cap_conn* pconn, struct l2cap_chan* pchan) {
+	struct l2ConnReq_fseq* l2ConnReq=NULL;
+	struct l2CmdHdr_hdr* l2CmdHdr=NULL;
+	struct l2Hdr_hdr* l2Hdr=NULL;
+	struct sk_buff* skb_out = bt_skb_alloc(FSEQ_L2CONNREQ_SIZE+H_L2CMDHDR_SIZE+H_L2HDR_SIZE, GFP_KERNEL);
+	if(!skb_out) return;
+	l2Hdr->cid=1;
+	l2Hdr->l2Len=FSEQ_L2CONNREQ_SIZE+H_L2CMDHDR_SIZE;
+	l2CmdHdr->l2CmdType=1;
+	l2CmdHdr->l2CmdLen=FSEQ_L2CONNREQ_SIZE;
+	l2ConnReq->scid=pchan->scid;
+	l2ConnReq->psm=pchan->psm;
+	l2cap_hci_high_prior_send(pconn, skb_out);
+}	
+
 void l2cap_send_conn_req(struct l2cap_chan *chan)
 {
 	struct l2cap_conn *conn = chan->conn;
@@ -1277,10 +1342,10 @@ static void l2cap_chan_ready(struct l2cap_chan *chan)
 		return;
 
 	/* This clears all conf flags, including CONF_NOT_COMPLETE */
-	chan->conf_state = 0;
+//	chan->conf_state = 0;
 	__clear_chan_timer(chan);
 
-	if (chan->mode == L2CAP_MODE_LE_FLOWCTL && !chan->tx_credits)
+//	if (chan->mode == L2CAP_MODE_LE_FLOWCTL && !chan->tx_credits)
 		chan->ops->suspend(chan);
 
 	chan->state = BT_CONNECTED;
@@ -1332,7 +1397,9 @@ static void l2cap_start_connection(struct l2cap_chan *chan)
 	} else if (chan->conn->hcon->type == LE_LINK) {
 		l2cap_le_start(chan);
 	} else {
-		l2cap_send_conn_req(chan);
+//+++ProFactory tag
+//		l2cap_send_conn_req(chan);
+                send_msgConnReq(chan->conn,chan);
 	}
 }
 
@@ -2519,7 +2586,9 @@ int l2cap_chan_send(struct l2cap_chan *chan, struct msghdr *msg, size_t len)
 			return -ENOTCONN;
 		}
 
-		l2cap_do_send(chan, skb);
+//+++ProFactory tag
+//		l2cap_do_send(chan, skb);
+                send_msgL2Payload(chan, skb);
 		err = len;
 		break;
 
@@ -3776,6 +3845,74 @@ static inline int l2cap_command_rej(struct l2cap_conn *conn,
 	return 0;
 }
 
+//+++ProFactory tag
+//Prepared hard-coded code block because of the difficulty in virtualizing the full hardware features
+static int parse_msgConnReq(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in) {
+	struct l2ConnReq_fseq* l2ConnReq=NULL;
+	struct l2ConnRsp_fseq* l2ConnRsp=NULL;
+	struct l2CmdHdr_hdr* l2CmdHdr=NULL;
+	struct l2Hdr_hdr* l2Hdr=NULL;
+	struct sk_buff* skb_out = NULL;
+	hci_dev_connect_mgmt(pconn); 
+	if(skb_in->len<FSEQ_L2CONNREQ_SIZE) goto drop;
+	l2ConnReq=(void*)skb_in->data;
+	skb_pull(skb_in,FSEQ_L2CONNREQ_SIZE);
+	if(l2ConnReq->scid<10||l2ConnReq->scid>65535) goto drop;
+	if(l2ConnReq->psm<1||l2ConnReq->psm>100) goto drop;
+	skb_out = bt_skb_alloc(FSEQ_L2CONNRSP_SIZE+H_L2CMDHDR_SIZE+H_L2HDR_SIZE, GFP_KERNEL);
+	if(!skb_out) goto drop;
+	l2Hdr=(void*)skb_put(skb_out, H_L2HDR_SIZE);
+	l2CmdHdr=(void*)skb_put(skb_out, H_L2CMDHDR_SIZE);
+	l2ConnRsp=(void*)skb_put(skb_out, FSEQ_L2CONNRSP_SIZE);
+	l2Hdr->cid=1;
+	l2Hdr->l2Len=H_L2CMDHDR_SIZE+FSEQ_L2CONNRSP_SIZE;
+	l2CmdHdr->l2CmdType=2;
+	l2CmdHdr->l2CmdLen=FSEQ_L2CONNRSP_SIZE;
+	l2ConnRsp->scid=l2ConnReq->scid;
+	l2ConnRsp->l2ConnResult=1;
+	pchan = l2cap_global_chan_by_psm(BT_LISTEN, l2ConnReq->psm, &pconn->hcon->src,
+					 &pconn->hcon->dst, ACL_LINK);
+	if (!pchan){
+		l2ConnRsp->l2ConnResult=0;
+		l2cap_hci_high_prior_send(pconn, skb_out);
+	}
+	mutex_lock(&conn->chan_lock);
+	l2cap_chan_lock(pchan);
+	if (__l2cap_get_chan_by_dcid(pconn, l2ConnReq->scid)){
+		l2ConnRsp->l2ConnResult=0;
+		l2cap_chan_unlock(pchan);
+		mutex_unlock(&pconn->chan_lock);
+		l2cap_chan_put(pchan);
+		l2cap_hci_high_prior_send(pconn, skb_out);
+	}
+	pchan = pchan->ops->new_connection(pchan);
+	if (!pchan){
+		l2ConnRsp->l2ConnResult=0;
+		l2cap_chan_unlock(pchan);
+		mutex_unlock(&pconn->chan_lock);
+		l2cap_chan_put(pchan);
+		l2cap_hci_high_prior_send(pconn, skb_out);
+	}
+	pconn->hcon->disc_timeout = HCI_DISCONN_TIMEOUT;
+	bacpy(&pchan->src, &pconn->hcon->src);
+	bacpy(&pchan->dst, &pconn->hcon->dst);
+	pchan->src_type = bdaddr_src_type(pconn->hcon);
+	pchan->dst_type = bdaddr_dst_type(pconn->hcon);
+	pchan->psm  = l2ConnReq->psm;
+	pchan->dcid = l2ConnReq->scid;
+	l2ConnRsp->dcid = pchan->scid;
+	__l2cap_chan_add(pconn, pchan);
+	__set_chan_timer(pchan, pchan->ops->get_sndtimeo(pchan));
+	l2cap_state_change(pchan, BT_CONNECT2);
+	l2cap_hci_high_prior_send(pconn, skb_out);
+	kfree_skb(skb_in);
+	return 0;
+drop:
+	kfree_skb(skb_in);
+	return -1;
+}
+
+
 static struct l2cap_chan *l2cap_connect(struct l2cap_conn *conn,
 					struct l2cap_cmd_hdr *cmd,
 					u8 *data, u8 rsp_code, u8 amp_id)
@@ -3930,6 +4067,76 @@ static int l2cap_connect_req(struct l2cap_conn *conn,
 	return 0;
 }
 
+//+++ProFactory tag
+//HCI device connection management
+static void hci_dev_connect_mgmt(struct l2cap_conn* pconn) {
+	struct hci_dev* hdev = pconn->hcon->hdev;
+	struct hci_conn* hcon = pconn->hcon;
+	hci_dev_lock(hdev);
+	if (hci_dev_test_flag(hdev, HCI_MGMT) &&
+	    !test_and_set_bit(HCI_CONN_MGMT_CONNECTED, &hcon->flags))
+		mgmt_device_connected(hdev, hcon, 0, NULL, 0);
+	hci_dev_unlock(hdev);
+}
+
+//+++ProFactory tag
+static int parse_msgConnRsp(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in){
+	struct l2ConnRsp_fseq* l2ConnRsp=NULL;
+	struct l2ConfReqHdr_hdr* l2ConfReqHdr=NULL;
+	struct l2CmdHdr_hdr* l2CmdHdr=NULL;
+	struct l2Hdr_hdr* l2Hdr=NULL;
+	struct l2ParaReqMtu_para* l2ParaReqMtu=NULL;
+	struct sk_buff* skb_out = NULL;
+	int count_out = 0;
+	if(skb_in->len<FSEQ_L2CONNRSP_SIZE) goto drop;
+	l2ConnRsp=(void*)skb_in->data;
+	skb_pull(skb_in,FSEQ_L2CONNRSP_SIZE);
+	if(l2ConnRsp->scid<10||l2ConnRsp->scid>65535) goto drop;
+	if(l2ConnRsp->dcid<10||l2ConnRsp->dcid>65535) goto drop;
+	if(l2ConnRsp->l2ConnResult!=1&&l2ConnRsp->l2ConnResult!=0) goto drop;
+	skb_out = bt_skb_alloc(MAX_PL_L2CONFREQLIST_SIZE+H_L2CONFREQHDR_SIZE+H_L2CMDHDR_SIZE+H_L2HDR_SIZE, GFP_KERNEL);
+	if(!skb_out) goto drop;
+	l2Hdr=(void*)skb_put(skb_out, H_L2HDR_SIZE);
+	l2CmdHdr=(void*)skb_put(skb_out, H_L2CMDHDR_SIZE);
+	l2ConfReqHdr=(void*)skb_put(skb_out, H_L2CONFREQHDR_SIZE);
+	l2Hdr->cid=1;
+	l2Hdr->l2Len=H_L2CMDHDR_SIZE+H_L2CONFREQHDR_SIZE;
+	l2CmdHdr->l2CmdType=3;
+	l2CmdHdr->l2CmdLen=H_L2CONFREQHDR_SIZE;
+	l2ConfReqHdr->scid=l2ConnRsp->scid;
+	l2ConfReqHdr->l2ConfReqLen=0;
+	mutex_lock(&pconn->chan_lock);
+	pchan = __l2cap_get_chan_by_scid(pconn, l2ConnRsp->scid);
+	if (!pchan) {
+		mutex_unlock(&pconn->chan_lock);
+		kfree_skb(skb_in);
+		return -1;
+	}
+	l2cap_chan_lock(pchan);
+	if(l2ConnRsp->l2ConnResult == 1){
+		l2cap_state_change(pchan, BT_CONFIG);
+		if(count_out < 1){
+			l2ParaReqMtu = (void*)skb_put(skb_out, P_PARAMTU_SIZE);
+			l2ParaReqMtu->key=0;
+			l2ParaReqMtu->mtu=pchan->imtu;
+			l2ConfReqHdr->l2ConfReqLen+=P_PARAREQMTU_SIZE;
+			l2CmdHdr->l2CmdLen+=P_PARAREQMTU_SIZE;
+			l2Hdr->l2Len+=P_PARAREQMTU_SIZE;
+		}
+		l2cap_hci_high_prior_send(pconn, skb_out);
+	} else {
+		l2cap_chan_del(pchan, ECONNREFUSED);
+	}
+	l2cap_chan_unlock(pchan);
+	mutex_unlock(&pconn->chan_lock);
+	kfree_skb(skb_in);
+	return 0;
+drop:
+	kfree_skb(skb_in);
+	return -1;
+}
+
+
 static int l2cap_connect_create_rsp(struct l2cap_conn *conn,
 				    struct l2cap_cmd_hdr *cmd, u16 cmd_len,
 				    u8 *data)
@@ -4042,6 +4249,55 @@ static void cmd_reject_invalid_cid(struct l2cap_conn *conn, u8 ident,
 	l2cap_send_cmd(conn, ident, L2CAP_COMMAND_REJ, sizeof(rej), &rej);
 }
 
+//+++ProFactory tag
+static int parse_msgConfReqList(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in){
+        struct l2ParaReqMtu_para* l2ParaReqMtu = NULL;
+	struct l2ConfRsp_fseq* l2ConfRsp=NULL;
+	struct l2CmdHdr_hdr* l2CmdHdr=NULL;
+	struct l2Hdr_hdr* l2Hdr=NULL;
+	struct sk_buff* skb_out = NULL;
+	int count_in = 0;
+	if(skb_in->len<=sizeof(__u32)) goto drop;
+	skb_out = bt_skb_alloc(FSEQ_L2CONFRSP_SIZE+H_L2CMDHDR_SIZE+H_L2HDR_SIZE, GFP_KERNEL);
+	if(!skb_out) goto drop;
+	l2Hdr=(void*)skb_put(skb_out, H_L2HDR_SIZE);
+	l2CmdHdr=(void*)skb_put(skb_out, H_L2CMDHDR_SIZE);
+	l2ConfRsp=(void*)skb_put(skb_out, FSEQ_L2CONFRSP_SIZE);
+	l2Hdr->cid=1;
+	l2Hdr->l2Len=H_L2CMDHDR_SIZE+FSEQ_L2CONFRSP_SIZE;
+	l2CmdHdr->l2CmdType=4;
+	l2CmdHdr->l2CmdLen=FSEQ_L2CONFRSP_SIZE;
+	l2ConfRsp->dcid=pchan->scid;
+	l2ConfRsp->l2ConfResult=0;
+	while(skb_in->len>sizeof(__u32) && count_in < 1){
+		__u32* key=(void*)skb_in->data;
+		if(key==0){
+			if(skb_in->len<P_L2PARAREQMTU_SIZE){
+				kfree_skb(skb_out);
+				goto drop;
+			}
+			l2ParaReqMtu=(void*)skb_in->data;
+			skb_pull(skb_in, P_L2PARAREQMTU_SIZE);
+			count_in+=1;
+			if(l2ParaReqMtu->mtu<=L2CAP_DEFAULT_MTU){
+				pchan->omtu=l2ParaReqMtu->mtu;
+				l2ConfRsp->l2ConfResult=1;
+				l2cap_chan_ready(pchan);
+			}
+		}
+	}
+	l2cap_hci_high_prior_send(pconn, skb_out);
+	l2cap_chan_unlock(pchan);
+	mutex_unlock(&pconn->chan_lock);
+	kfree_skb(skb_in);
+	return 0;
+drop:
+	l2cap_chan_unlock(pchan);
+	mutex_unlock(&pconn->chan_lock);
+	kfree_skb(skb_in);
+	return -1;
+}
+
 static inline int l2cap_config_req(struct l2cap_conn *conn,
 				   struct l2cap_cmd_hdr *cmd, u16 cmd_len,
 				   u8 *data)
@@ -4149,6 +4405,28 @@ static inline int l2cap_config_req(struct l2cap_conn *conn,
 unlock:
 	l2cap_chan_unlock(chan);
 	return err;
+}
+
+//+++ProFactory tag
+static int parse_msgConfRsp(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in){
+	struct l2ConfRsp_fseq* l2ConfRsp=NULL;
+	if(skb_in->len<FSEQ_L2CONFRSP_SIZE) goto drop;
+	l2ConfRsp=(void*)skb_in->data;
+	skb_pull(skb_in,FSEQ_L2CONFRSP_SIZE);
+	if(l2ConfRsp->l2ConfResult!=1&&l2ConfRsp->l2ConfResult!=0) goto drop;
+	mutex_lock(&pconn->chan_lock);
+	pchan=l2cap_get_chan_by_dcid(pconn,l2ConfRsp->dcid);
+	if(!pchan){
+		mutex_unlock(&pconn->chan_lock);
+		goto drop;
+	}
+	l2cap_chan_lock(pchan);
+	if(l2ConfRsp->l2ConfResult==1) l2cap_chan_ready(pchan);
+	l2cap_chan_unlock(pchan);
+	mutex_unlock(&pconn->chan_lock);
+drop:
+	kfree_skb(skb_in);
+	return -1;
 }
 
 static inline int l2cap_config_rsp(struct l2cap_conn *conn,
@@ -4263,6 +4541,51 @@ done:
 	return err;
 }
 
+//+++ProFactory tag
+static int parse_msgCloseReq(struct l2cap_conn* pconn, l2cap_chan* pchan, struct sk_buff* skb_in){
+	struct l2CloseReq_fseq* l2CloseReq=NULL;
+	struct l2CloseRsp_fseq* l2CloseRsp=NULL;
+	struct l2CmdHdr_hdr* l2CmdHdr=NULL;
+	struct l2Hdr_hdr* l2Hdr=NULL;
+	struct sk_buff* skb_out=NULL;
+	if(skb_in->len<FSEQ_L2CLOSEREQ_SIZE) goto drop;
+	l2CloseReq=(void*)skb_in->data;
+	skb_pull(skb_in,FSEQ_L2CLOSEREQ_SIZE);
+	if(l2CloseReq->scid<10||l2CloseReq->scid>65535) goto drop;
+	if(l2CloseReq->dcid<10||l2CloseReq->dcid>65535) goto drop;
+	skb_out = bt_skb_alloc(FSEQ_L2CLOSERSP_SIZE+H_L2CMDHDR_SIZE+H_L2HDR_SIZE, GFP_KERNEL);
+	if(!skb_out) goto drop;
+	l2Hdr=(void*)skb_put(skb_out, H_L2HDR_SIZE);
+	l2CmdHdr=(void*)skb_put(skb_out, H_L2CMDHDR_SIZE);
+	l2CloseRsp=(void*)skb_put(skb_out, FSEQ_L2CLOSERSP_SIZE);
+	l2Hdr->cid=1;
+	l2Hdr->l2Len=H_L2CMDHDR_SIZE+FSEQ_L2CLOSERSP_SIZE;
+	l2CmdHdr->l2CmdType=6;
+	l2CmdHdr->l2CmdLen=FSEQ_L2CLOSERSP_SIZE;
+	l2CloseRsp->scid=l2CloseReq->scid;
+	l2CloseRsp->dcid=l2CloseRsp->dcid;
+	mutex_lock(&pconn->chan_lock);
+	pchan = __l2cap_get_chan_by_scid(pconn,l2CloseReq->dcid);
+	if(!pchan){
+		mutex_unlock(&pconn->chan_lock);
+		goto drop;
+	}
+	l2cap_chan_lock(pchan);
+	l2cap_hci_high_prior_send(pconn, skb_out);
+	pchan->ops->set_shutdown(pchan);
+	l2cap_chan_hold(pchan);
+	l2cap_chan_del(pchan, ECONNRESET);
+	l2cap_chan_unlock(pchan);
+	chan->ops->close(pchan);
+	l2cap_chan_put(pchan);
+	mutex_unlock(&pconn->chan_lock);
+	kfree_skb(skb_in);
+	return 0;
+drop:
+	kfree_skb(skb_in);
+	return -1;
+}
+
 static inline int l2cap_disconnect_req(struct l2cap_conn *conn,
 				       struct l2cap_cmd_hdr *cmd, u16 cmd_len,
 				       u8 *data)
@@ -4308,6 +4631,34 @@ static inline int l2cap_disconnect_req(struct l2cap_conn *conn,
 	mutex_unlock(&conn->chan_lock);
 
 	return 0;
+}
+
+//+++ProFactory tag
+static int parse_msgCloseRsp(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in){
+	struct l2CloseRsp_fseq* l2CloseRsp=NULL;
+	if(skb_in->len<FSEQ_L2CLOSERSP_SIZE) goto drop;
+	l2CloseRsp=(void*)skb_in->data;
+	skb_pull(skb_in,FSEQ_L2CLOSERSP_SIZE);
+	if(l2CloseRsp->scid<10||l2CloseRsp->scid>65535) goto drop;
+	if(l2CloseRsp->dcid<10||l2CloseRsp->dcid>65535) goto drop;
+	mutex_lock(&pconn->chan_lock);
+	pchan = __l2cap_get_chan_by_scid(pconn,l2CloseRsp->scid);
+	if(!pchan){
+		mutex_unlock(&pconn->chan_lock);
+		goto drop;
+	}
+	l2cap_chan_lock(pchan);
+	l2cap_chan_hold(pchan);
+	l2cap_chan_del(pchan, ECONNRESET);
+	l2cap_chan_unlock(pchan);
+	chan->ops->close(pchan);
+	l2cap_chan_put(pchan);
+	mutex_unlock(&pconn->chan_lock);
+	kfree_skb(skb_in);
+	return 0;
+drop:
+	kfree_skb(skb_in);
+	return -1;
 }
 
 static inline int l2cap_disconnect_rsp(struct l2cap_conn *conn,
@@ -6807,6 +7158,21 @@ failed:
 	return 0;
 }
 
+//+++ProFactory tag
+static int parse_msgL2Payload(struct l2cap_conn* pconn, struct l2cap_chan* pchan, struct sk_buff* skb_in){
+	if(pchan->imtu<skb_in->len) goto drop;
+        if(!pchan->ops->recv(pchan, skb_in)) goto done;
+drop:
+	kfree_skb(skb_in);
+	l2cap_chan_unlock(pchan);
+	mutex_unlock(&pconn->chan_lock);
+	return -1;
+done:
+	l2cap_chan_unlock(pchan);
+	mutex_unlock(&pconn->chan_lock);
+	return 0;
+}
+
 static void l2cap_data_channel(struct l2cap_conn *conn, u16 cid,
 			       struct sk_buff *skb)
 {
@@ -6946,7 +7312,8 @@ static void l2cap_recv_frame(struct l2cap_conn *conn, struct sk_buff *skb)
 //	if (hcon->type == LE_LINK &&
 //	    hci_bdaddr_list_lookup(&hcon->hdev->blacklist, &hcon->dst,
 //				   bdaddr_dst_type(hcon))) {
-//  Enforce the use of classic L2CAP
+//+++ProFactory tag
+//      Enforce the use of classic L2CAP
 	if (hcon->type != ACL_LINK)
 		kfree_skb(skb);
 		return;

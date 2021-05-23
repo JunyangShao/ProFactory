@@ -1,6 +1,7 @@
 -- A highly simplified classic L2CAP written in ProFactory DSL
 -- Fei Wang, Nov 2020
 
+import System.IO
 import ProFactoryTypes
 
 --Define L2CAP message header
@@ -12,9 +13,9 @@ l2Hdr = Hdr "l2Hdr" [chanID] l2Len
 payload = Var "l2Payload" 1 1400
 
 --Define L2CAP command header
-l2CmdType = Fix "l2CmdType" 1 1 25
-l2CmdLen = Fix "l2CmdLen" 2 1 0
-l2CmdHdr = Hdr "l2CmdHdr" [l2CmdType] l2CmdLen
+cmdType = Fix "l2CmdType" 1 1 25
+cmdLen = Fix "l2CmdLen" 2 1 0
+cmdHdr = Hdr "l2CmdHdr" [cmdType] cmdLen
 
 --Define L2CAP connection request command
 srcChanID = Fix "scid" 2 10 65535
@@ -49,7 +50,7 @@ paraOMTU = Para "omtu" 1 mtu
 paraPSM = Para "psm" 2 psm
 paraSrcChanID = Para "scid" 3 srcChanID
 paraDstChanID = Para "dcid" 4 dstChanID
-chan = Chan [paraIMTU, paraOMTU, paraPSM, paraSrcChanID, paraDstChanID, paraConfResult]
+chan = Chan [paraIMTU, paraOMTU, paraPSM, paraSrcChanID, paraDstChanID]
 
 --Define L2CAP connection/channel data structure
 conn = Conn []
@@ -116,4 +117,15 @@ msgPayload = MsgSymbol fmtL2 [1]
 --sendMsgCloseReqRoutine = Send 
 --sendMsgPayload = Send
 
-
+main = do
+    appendFile "l2cap.h" (pfEmitDeclare l2Hdr ++ pfEmitDeclare cmdHdr
+			++pfEmitDeclare connReq ++ pfEmitDeclare connRsp
+			++pfEmitDeclare confReqHdr ++ pfEmitDeclare confRsp
+			++pfEmitDeclare paraReqMTU ++ pfEmitDeclare closeReq
+			++pfEmitDeclare closeRsp ++ pfEmitMacro l2Hdr
+                        ++pfEmitMacro cmdHdr ++ pfEmitMacro connReq
+                        ++pfEmitMacro connRsp ++ pfEmitMacro confReqHdr
+                        ++pfEmitMacro confRsp ++ pfEmitMacro paraReqMTU
+                        ++pfEmitMacro closeReq ++ pfEmitMacro closeRsp
+                        ++"#endif\n")
+    appendFile "l2cap_core.c" (pfEmitBlock fmtL2)

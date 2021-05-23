@@ -155,7 +155,7 @@ instance PfCode FixSeq where
     pfCodeGen (FixSeq x y) = x
     pfGetMacro (FixSeq x y) = "FSEQ_" ++ map toUpper x ++ "_SIZE"
     pfMacroGen (FixSeq x y) = "#define FSEQ_" ++ map toUpper x ++ "_SIZE "
-                             ++ show (sum (map sizeFix y))
+                             ++ show (sum (map sizeFix y)) ++ "\n"
     pfExtractGen (FixSeq x y) = "if(skb_in->len<" ++ k ++ ") goto drop;\n"
 	                           ++ x ++ "=(void*)skb_in->data;\n" ++ "skb_pull(skb_in,"
                                ++ k ++ ");\n"
@@ -195,7 +195,7 @@ instance PfCode Hdr where
     pfCodeGen (Hdr x y z) = x
     pfGetMacro (Hdr x y z) = "H_" ++ map toUpper x ++ "_SIZE"
     pfMacroGen (Hdr x y z) = "#define H_" ++ map toUpper x ++ "_SIZE "
-                             ++ show (sum (map sizeFix y) + sizeFix z)
+                             ++ show (sum (map sizeFix y) + sizeFix z) ++ "\n"
     pfExtractGen (Hdr x y z) = "if(skb_in->len<=" ++ k ++ ") goto drop;\n"
 	                           ++ x ++ "=(void*)skb_in->data;\n" ++ "skb_pull(skb_in,"
                                ++ k ++ ");\n" ++ "if(" ++ x ++ "->len!=skb_in->len) goto drop;\n"
@@ -233,7 +233,7 @@ instance PfCode Para where
     pfCodeGen (Para x y z) = x
     pfGetMacro (Para x y z) = "P_" ++ map toUpper x ++ "_SIZE"
     pfMacroGen (Para x y z) = "#define P_" ++ map toUpper x ++ "_SIZE "
-                              ++ show (4 + sizeFix z)
+                              ++ show (4 + sizeFix z) ++ "\n"
     pfExtractGen (Para x y z) = "case " ++ show y ++ ":\n"
 	                            ++ "if(skb->len<" ++ k ++ ") goto drop;\n"
 								++ x ++ "=(void*)skb->data;\n" ++ "skb_pull(skb_in,"

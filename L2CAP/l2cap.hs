@@ -31,7 +31,7 @@ confReqLen = Fix "l2ConfReqLen" 2 1 600
 confReqHdr = Hdr "l2ConfReqHdr" [srcChanID] confReqLen
 mtu = Fix "mtu" 2 128 1024
 paraReqMTU = Para "l2ParaReqMtu" 0 mtu
-confReqList = Plist "l2ConfReqList" [paraReqMTU]
+confReqList = Plist "l2ConfReqList" 1 [paraReqMTU]
 
 --Define L2CAP configuration response command
 confResult = Fix "l2ConfResult" 1 0 1
@@ -44,12 +44,12 @@ closeReq = FixSeq "l2CloseReq" [srcChanID, dstChanID]
 closeRsp = FixSeq "l2CloseRsp" [srcChanID, dstChanID]
 
 --Define L2CAP channel data structure
-paraMTU = Para "imtu" 0 mtu
-paraMTU = Para "omtu" 1 mtu
+paraIMTU = Para "imtu" 0 mtu
+paraOMTU = Para "omtu" 1 mtu
 paraPSM = Para "psm" 2 psm
 paraSrcChanID = Para "scid" 3 srcChanID
 paraDstChanID = Para "dcid" 4 dstChanID
-chan = Chan [paraMTU, paraPSM, paraSrcChanID, paraDstChanID, paraConfResult]
+chan = Chan [paraIMTU, paraOMTU, paraPSM, paraSrcChanID, paraDstChanID, paraConfResult]
 
 --Define L2CAP connection/channel data structure
 conn = Conn []
@@ -65,12 +65,12 @@ fmtL2Payload = MsgFmtVar "msgL2Payload" payload
 fmtConnReq = MsgFmtFixSeq "msgConnReq" connReq
 fmtConnRsp = MsgFmtFixSeq "msgConnRsp" connRsp
 fmtConfReqList = MsgFmtPlist "msgConfReqList" confReqList
-fmtConfReq = MsgFmtLayer "msgConfReq" confReqHdr [(FindChanByParaExpr paraDstChanID (BinaryExpr confReqHdr PfACC srcChanID), fmtConfReqList)]
+fmtConfReq = MsgFmtLayer "msgConfReq" confReqHdr [(FindChanByParaExpr paraDstChanID (BinaryExpr (HdrExpr confReqHdr) PfACC (FixExpr srcChanID)), fmtConfReqList)]
 fmtConfRsp = MsgFmtFixSeq "msgConfRsp" confRsp
 fmtCloseReq = MsgFmtFixSeq "msgCloseReq" closeReq
 fmtCloseRsp = MsgFmtFixSeq "msgCloseRsp" closeRsp
-fmtL2Cmd = MsgFmtLayer "msgL2Cmd" cmdHdr [(BinaryExpr (BinaryExpr cmdHdr PfACC cmdType) PfEQ 1, fmtConnReq), (BinaryExpr (BinaryExpr cmdHdr PfACC cmdType) PfEQ 2, fmtConnRsp), (BinaryExpr (BinaryExpr cmdHdr PfACC cmdType) PfEQ 3, fmtConfReq), (BinaryExpr (BinaryExpr cmdHdr PfACC cmdType) PfEQ 4, fmtConfRsp), (BinaryExpr (BinaryExpr cmdHdr PfACC cmdType) PfEQ 5, closeReq), (BinaryExpr (BinaryExpr cmdHdr PfACC cmdType) PfEQ 6, closeRsp)]
-fmtL2 = MsgFmtLayer "msgL2" l2Hdr [(BinaryExpr (BinaryExpr l2Hdr PfACC chanID) PfEQ 1, fmtL2Cmd), (BinaryExpr (BinaryExpr l2Hdr PfACC chanID) PfGE 10, fmtL2Payload)]
+fmtL2Cmd = MsgFmtLayer "msgL2Cmd" cmdHdr [(BinaryExpr (BinaryExpr (HdrExpr cmdHdr) PfACC (FixExpr cmdType)) PfEQ (ConstIntExpr 1), fmtConnReq), (BinaryExpr (BinaryExpr (HdrExpr cmdHdr) PfACC (FixExpr cmdType)) PfEQ (ConstIntExpr 2), fmtConnRsp), (BinaryExpr (BinaryExpr (HdrExpr cmdHdr) PfACC (FixExpr cmdType)) PfEQ (ConstIntExpr 3), fmtConfReq), (BinaryExpr (BinaryExpr (HdrExpr cmdHdr) PfACC (FixExpr cmdType)) PfEQ (ConstIntExpr 4), fmtConfRsp), (BinaryExpr (BinaryExpr (HdrExpr cmdHdr) PfACC (FixExpr cmdType)) PfEQ (ConstIntExpr 5), fmtCloseReq), (BinaryExpr (BinaryExpr (HdrExpr cmdHdr) PfACC (FixExpr cmdType)) PfEQ (ConstIntExpr 6), fmtCloseRsp)]
+fmtL2 = MsgFmtLayer "msgL2" l2Hdr [(BinaryExpr (BinaryExpr (HdrExpr l2Hdr) PfACC (FixExpr chanID)) PfEQ (ConstIntExpr 1), fmtL2Cmd), (BinaryExpr (BinaryExpr (HdrExpr l2Hdr) PfACC (FixExpr chanID)) PfGE (ConstIntExpr 10), fmtL2Payload)]
 
 --Define message symbols
 msgConnReq = MsgSymbol fmtL2 [0, 0]
@@ -115,3 +115,5 @@ msgPayload = MsgSymbol fmtL2 [1]
 --sendMsgConnReq = Send 
 --sendMsgCloseReqRoutine = Send 
 --sendMsgPayload = Send
+
+

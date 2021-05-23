@@ -34,9 +34,6 @@
 #include <asm/unaligned.h>
 #include <linux/atomic.h>
 
-//+++ProFactory tag
-#include "l2cap_me.h"
-
 /* L2CAP defaults */
 #define L2CAP_DEFAULT_MTU		672
 #define L2CAP_DEFAULT_MIN_MTU		48
@@ -954,5 +951,3 @@ void l2cap_conn_put(struct l2cap_conn *conn);
 
 int l2cap_register_user(struct l2cap_conn *conn, struct l2cap_user *user);
 void l2cap_unregister_user(struct l2cap_conn *conn, struct l2cap_user *user);
-
-#endif /* __L2CAP_H */
